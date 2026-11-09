@@ -45,7 +45,12 @@ clone_at() { # DIR REPO COMMIT
   [[ "$(git -C "$1" rev-parse HEAD)" == "$3" ]] || die "$2: fetched the wrong commit"
 }
 fetch_sha() { # URL DEST SHA256
-  curl -fsSL --retry 3 -o "$2" "$1"
+  local i
+  for i in 1 2 3 4 5 6; do
+    curl -fsSL --retry 3 -o "$2" "$1" && break
+    [[ $i == 6 ]] && die "download failed: $1"
+    echo "retry $i: $1" >&2; sleep 30
+  done
   [[ "$(sha256sum "$2" | awk '{print $1}')" == "$3" ]] || die "sha256 mismatch: $1"
 }
 mkdir -p "$DEPS"
