@@ -63,6 +63,12 @@ DETOUR_DECL_MEMBER1(ListenEvents, bool, CLC_ListenEvents*, msg)
 
 	#endif
 
+	#if SOURCE_ENGINE != SE_CSGO
+	// css34: one line per connecting client, so the real event count of legit clients is visible
+	// (threshold calibration) and it is provable that the detour is hit.
+	smutils->LogMessage(myself, "ListenEvents client %d events=%d detected=%d", client, counter, detected ? 1 : 0);
+	#endif
+
 	if (detected)
 	{
 		forwardCheatDetected->PushCell(client);
