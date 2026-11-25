@@ -12,7 +12,7 @@ public Plugin myinfo =
 {
 	name = "AntiDLL Handler", 
 	author = "JDW", 
-	version = "1.7.1", 
+	version = "1.7.1-css34.2", 
 	url = "WWW"
 };
 
@@ -67,9 +67,9 @@ void ConfigLoad()
 public void AD_OnCheatDetected(const int iClient)
 {
 	// css34: log every detection, even when no action is taken (whitelist, ad_enable 0, client not yet in game)
-	LogToFile("addons/sourcemod/logs/AntiDLL.log", "[detect] client %d ingame=%d status=%d method=%d", iClient, IsClientInGame(iClient), status, method);
-	
-	if (IsClientInGame(iClient))
+	LogToFile("addons/sourcemod/logs/AntiDLL.log", "[detect] client %d ingame=%d authorized=%d status=%d method=%d", iClient, IsClientInGame(iClient), IsClientAuthorized(iClient), status, method);
+
+	if (IsClientInGame(iClient) && IsClientAuthorized(iClient))
 	{
 		PlayerAction(iClient);
 	}
@@ -79,11 +79,22 @@ public void AD_OnCheatDetected(const int iClient)
 	}
 }
 
-// css34: clc_ListenEvents arrives during signon, before the client is in game and after OnClientAuthorized,
-// so the deferred action must run here (in the upstream it ran in OnClientAuthorized and was never reached).
+// css34: the deferred action runs once the client is both in game and authorized, whichever comes last.
+// With Steam auth OnClientAuthorized can come after signon (the upstream 1.7 path). With a SteamID
+// emulator (CS:S v34) the client is authorized on connect, before clc_ListenEvents arrives, so only
+// OnClientPutInServer is reached.
+public void OnClientAuthorized(int iClient, const char[] sAuth)
+{
+	if (bDetect[iClient] && IsClientInGame(iClient))
+	{
+		bDetect[iClient] = false;
+		PlayerAction(iClient);
+	}
+}
+
 public void OnClientPutInServer(int iClient)
 {
-	if (bDetect[iClient])
+	if (bDetect[iClient] && IsClientAuthorized(iClient))
 	{
 		bDetect[iClient] = false;
 		PlayerAction(iClient);
@@ -154,19 +165,19 @@ void PlayerAction(int client)
 		
 		if (iNotification & 8)
 		{
-			PrintToChatAll(message);
+			PrintToChatAll("%s", message);	// css34: the message holds the player name (%L); "%s" was dropped in upstream 1.7
 		}
 		if (iNotification & 4)
 		{
-			PrintToAdmins(message);
+			PrintToAdmins("%s", message);
 		}
 		if (iNotification & 2)
 		{
-			PrintToServer(message);
+			PrintToServer("%s", message);
 		}
 		if (iNotification & 1)
 		{
-			LogToFile("addons/sourcemod/logs/AntiDLL.log", message);
+			LogToFile("addons/sourcemod/logs/AntiDLL.log", "%s", message);
 		}
 	}
 }
@@ -180,7 +191,7 @@ void PrintToAdmins(const char[] format, any...)
 		if (IsClientInGame(i) && !IsFakeClient(i) && CheckCommandAccess(i, "", ADMFLAG_BAN, true))
 		{
 			VFormat(sMsg, sizeof(sMsg), format, 2);
-			PrintToChat(i, sMsg);
+			PrintToChat(i, "%s", sMsg);
 		}
 	}
 }
