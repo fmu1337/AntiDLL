@@ -12,7 +12,7 @@ public Plugin myinfo =
 {
 	name = "AntiDLL Handler", 
 	author = "JDW", 
-	version = "1.7.1", 
+	version = "1.7.1-css34.2", 
 	url = "WWW"
 };
 
@@ -66,7 +66,10 @@ void ConfigLoad()
 
 public void AD_OnCheatDetected(const int iClient)
 {
-	if (IsClientInGame(iClient))
+	// css34: log every detection, even when no action is taken (whitelist, ad_enable 0, client not yet in game)
+	LogToFile("addons/sourcemod/logs/AntiDLL.log", "[detect] client %d ingame=%d authorized=%d status=%d method=%d", iClient, IsClientInGame(iClient), IsClientAuthorized(iClient), status, method);
+
+	if (IsClientInGame(iClient) && IsClientAuthorized(iClient))
 	{
 		PlayerAction(iClient);
 	}
@@ -76,10 +79,24 @@ public void AD_OnCheatDetected(const int iClient)
 	}
 }
 
-public void OnClientAuthorized(int iClient)
+// css34: the deferred action runs once the client is both in game and authorized, whichever comes last.
+// With Steam auth OnClientAuthorized can come after signon (the upstream 1.7 path). With a SteamID
+// emulator (CS:S v34) the client is authorized on connect, before clc_ListenEvents arrives, so only
+// OnClientPutInServer is reached.
+public void OnClientAuthorized(int iClient, const char[] sAuth)
 {
-	if(bDetect[iClient])
+	if (bDetect[iClient] && IsClientInGame(iClient))
 	{
+		bDetect[iClient] = false;
+		PlayerAction(iClient);
+	}
+}
+
+public void OnClientPutInServer(int iClient)
+{
+	if (bDetect[iClient] && IsClientAuthorized(iClient))
+	{
+		bDetect[iClient] = false;
 		PlayerAction(iClient);
 	}
 }
@@ -112,6 +129,7 @@ void PlayerAction(int client)
 	
 	if (hWhiteList.FindString(sAuthID) != -1)
 	{
+		LogToFile("addons/sourcemod/logs/AntiDLL.log", "[whitelist] %L skipped", client);
 		return;
 	}
 	
@@ -126,7 +144,7 @@ void PlayerAction(int client)
 				// nothing  
 			}
 			case KICK: {
-				KickClient(client, message);
+				KickClient(client, "%s", message);
 			}
 			case BAN: {
 				BanClient(client, blocking_time, BANFLAG_AUTO, message);
@@ -147,19 +165,19 @@ void PlayerAction(int client)
 		
 		if (iNotification & 8)
 		{
-			PrintToChatAll(message);
+			PrintToChatAll("%s", message);	// css34: the message holds the player name (%L); "%s" was dropped in upstream 1.7
 		}
 		if (iNotification & 4)
 		{
-			PrintToAdmins(message);
+			PrintToAdmins("%s", message);
 		}
 		if (iNotification & 2)
 		{
-			PrintToServer(message);
+			PrintToServer("%s", message);
 		}
 		if (iNotification & 1)
 		{
-			LogToFile("addons/sourcemod/logs/AntiDLL.log", message);
+			LogToFile("addons/sourcemod/logs/AntiDLL.log", "%s", message);
 		}
 	}
 }
@@ -173,7 +191,7 @@ void PrintToAdmins(const char[] format, any...)
 		if (IsClientInGame(i) && !IsFakeClient(i) && CheckCommandAccess(i, "", ADMFLAG_BAN, true))
 		{
 			VFormat(sMsg, sizeof(sMsg), format, 2);
-			PrintToChat(i, sMsg);
+			PrintToChat(i, "%s", sMsg);
 		}
 	}
 }
@@ -195,7 +213,8 @@ void LoadWhiteList()
 	while (!hFile.EndOfFile())
 	{
 		hFile.ReadLine(sBuffer, sizeof(sBuffer));
-		if (!sBuffer[0])continue;
+		TrimString(sBuffer);	// css34: ReadLine keeps the newline, so entries never matched a SteamID
+		if (!sBuffer[0] || sBuffer[0] == '/')continue;
 		hWhiteList.PushString(sBuffer);
 	}
 	hFile.Close();
@@ -214,10 +233,11 @@ public Action CommandAddWhiteList(int iClient, int iArgs)
 	
 	char sPath[PLATFORM_MAX_PATH];
 	BuildPath(Path_SM, sPath, sizeof(sPath), "configs/antidll/whitelist.ini");
-	File hFile;
-	if (FileExists(sPath) || (hFile = OpenFile(sPath, "a")) != null)
+	File hFile = OpenFile(sPath, "a");	// css34: upstream skipped OpenFile when the file existed and then wrote to a null handle
+	if (hFile != null)
 	{
 		hFile.WriteLine(sSteamID);
+		hFile.Close();
 		ReplyToCommand(iClient, "[SM] %s successfully added to whitelist", sSteamID);
 		LoadWhiteList();
 	}
@@ -225,7 +245,6 @@ public Action CommandAddWhiteList(int iClient, int iArgs)
 	{
 		ReplyToCommand(iClient, "[SM] Failed to open %s for writing", sPath);
 	}
-	hFile.Close();
 	
 	return Plugin_Handled;
 }
